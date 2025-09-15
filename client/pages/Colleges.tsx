@@ -1,145 +1,146 @@
-import { useEffect, useMemo, useState } from "react";
+import * as React from "react";
+import { useState, useMemo } from "react";
+import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { colleges as seedColleges } from "@/data/colleges";
-import LeafletMap from "@/components/maps/LeafletMap";
+import { Input } from "@/components/ui/input";
+import { getSupabase } from "@/lib/supabase";
+import CollegeMap from "@/components/map/CollegeMap"; // Normal import is fine now
 
-function saveCollege(id: string) {
-  const key = "guidely:savedColleges";
-  const set = new Set<string>(JSON.parse(localStorage.getItem(key) || "[]"));
-  set.add(id);
-  localStorage.setItem(key, JSON.stringify(Array.from(set)));
-}
+// Define a more detailed type for your college data from Supabase
+type College = {
+  id: number;
+  name: string | null;
+  district: string | null;
+  contact: string | null;
+  website: string | null;
+  programs: string | null;
+  cut_offs: string | null;
+  facilities: string | null;
+  lat: number | null;
+  lng: number | null;
+};
 
 export default function Colleges() {
-  const [view, setView] = useState<"map" | "list">("list");
-  const [colleges, setColleges] = useState(seedColleges);
+  const [colleges, setColleges] = useState<College[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [districtFilter, setDistrictFilter] = useState("");
 
-  // offline cache
-  useEffect(() => {
-    const key = "guidely:colleges";
-    const cached = localStorage.getItem(key);
-    if (!cached) localStorage.setItem(key, JSON.stringify(seedColleges));
-    else setColleges(JSON.parse(cached));
+  React.useEffect(() => {
+    async function fetchColleges() {
+      const supabase = getSupabase();
+      if (!supabase) {
+        setLoading(false);
+        return;
+      }
+      const { data, error } = await supabase.from("college").select("*").order('created_at', { ascending: false });
+      if (error) {
+        console.error("Error fetching colleges:", error);
+      } else {
+        setColleges(data || []);
+      }
+      setLoading(false);
+    }
+    fetchColleges();
   }, []);
 
-  const bbox = useMemo(() => {
-    const lats = colleges.map((c) => c.latitude);
-    const lons = colleges.map((c) => c.longitude);
-    return {
-      minLat: Math.min(...lats),
-      maxLat: Math.max(...lats),
-      minLon: Math.min(...lons),
-      maxLon: Math.max(...lons),
-    };
+  const districts = useMemo(() => {
+    const d = new Set(colleges.map((c) => c.district).filter(Boolean));
+    return Array.from(d).sort();
   }, [colleges]);
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return colleges.filter((c) => {
+      if (districtFilter && c.district !== districtFilter) return false;
+      const nameMatch = c.name ? c.name.toLowerCase().includes(q) : false;
+      const districtMatch = c.district ? c.district.toLowerCase().includes(q) : false;
+      return nameMatch || districtMatch;
+    });
+  }, [colleges, search, districtFilter]);
+  
+  if (loading) {
+    return <div className="container py-10 text-center">Loading colleges...</div>;
+  }
 
   return (
     <section className="container py-10">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-extrabold tracking-tight">
-            Nearby Government Colleges
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Raipur district — map + list with quick details.
-          </p>
-        </div>
-        <div className="inline-flex rounded-full border p-1">
-          <Button
-            variant={view === "list" ? "default" : "ghost"}
+      <header className="mb-6 rounded-2xl bg-white/70 p-6 shadow-sm backdrop-blur">
+        <h1 className="text-2xl font-extrabold tracking-tight">
+          Government Colleges
+        </h1>
+        <p className="mt-1 text-muted-foreground">
+          Discover programs, cut-offs, and facilities in your area.
+        </p>
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by college name or district..."
             className="rounded-full"
-            onClick={() => setView("list")}
+          />
+          <select
+            value={districtFilter}
+            onChange={(e) => setDistrictFilter(e.target.value)}
+            className="flex h-10 w-full items-center justify-between rounded-full border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:max-w-xs"
           >
-            List
-          </Button>
-          <Button
-            variant={view === "map" ? "default" : "ghost"}
-            className="rounded-full"
-            onClick={() => setView("map")}
-          >
-            Map
-          </Button>
+            <option value="">All Districts</option>
+            {districts.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </select>
         </div>
       </header>
 
-      {view === "map" ? (
-        <div className="mt-6 rounded-2xl border bg-white/80 p-4 shadow-sm">
-          <LeafletMap
-            colleges={colleges}
-            center={{ lat: 21.2514, lng: 81.6296 }}
-          />
-        </div>
-      ) : (
-        <>
-          <div className="mt-6">
-            <input
-              className="w-full rounded-full border px-4 py-2 text-sm"
-              placeholder="Search by name or district..."
-              onChange={(e) => {
-                const q = e.target.value.toLowerCase();
-                setColleges(
-                  seedColleges.filter(
-                    (c) =>
-                      c.name.toLowerCase().includes(q) ||
-                      c.district.toLowerCase().includes(q),
-                  ),
-                );
-              }}
-            />
-          </div>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            {colleges.map((c) => (
-              <Card key={c.id} className="border-0 bg-white/80 shadow-sm">
-                <CardHeader>
-                  <CardTitle className="text-lg">{c.name}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid gap-2 text-sm">
-                    <div className="text-muted-foreground">
-                      {c.district}, {c.state}
-                    </div>
-                    <div>
-                      <strong>Programs:</strong> {c.programs.join(", ")}
-                    </div>
-                    <div>
-                      <strong>Facilities:</strong>{" "}
-                      {Object.entries(c.facilities)
-                        .filter(([, v]) => v)
-                        .map(([k]) => k)
-                        .join(", ") || "N/A"}
-                    </div>
-                    <div>
-                      <strong>Medium:</strong>{" "}
-                      {c.medium_of_instruction.join(", ")}
-                    </div>
-                    <div>
-                      <strong>Cut-offs:</strong>{" "}
-                      {Object.entries(c.cutoffs_example)
-                        .map(([k, v]) => `${k}: ${v}`)
-                        .join("; ")}
-                    </div>
-                    <div>
-                      <strong>Contact:</strong>{" "}
-                      {typeof c.contact === "string"
-                        ? c.contact
-                        : `${c.contact.phone || ""}${(c as any).contact?.email ? " • " + (c as any).contact.email : ""}`}
-                    </div>
-                  </div>
-                  <div className="mt-3">
-                    <Button
-                      className="rounded-full"
-                      onClick={() => saveCollege(c.id)}
-                    >
-                      Save to Profile
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </>
-      )}
+      <div className="mb-6">
+        <CollegeMap colleges={filtered} />
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {filtered.map((c) => (
+          <Card
+            key={c.id}
+            className="flex flex-col border-0 bg-white/70 shadow-sm transition-all hover:shadow-md"
+          >
+            <CardHeader>
+              <CardTitle className="text-lg">{c.name || "Unnamed College"}</CardTitle>
+              <p className="text-sm text-muted-foreground">{c.district || "No District"}</p>
+            </CardHeader>
+            <CardContent className="flex flex-1 flex-col">
+              {c.programs && <p className="text-sm"><strong>Programs:</strong> {c.programs}</p>}
+              {c.cut_offs && <p className="text-sm mt-1"><strong>Cut-offs:</strong> {c.cut_offs}</p>}
+              
+              <div className="flex-1" />
+
+              <div className="mt-4 flex items-center justify-between">
+                {c.website && (
+                  <a
+                    href={c.website}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-primary underline-offset-4 hover:underline"
+                  >
+                    Visit Website
+                  </a>
+                )}
+                <Link
+                  to={`/college/${c.id}`}
+                  className="text-sm font-semibold text-primary"
+                >
+                  View Details &rarr;
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+        {filtered.length === 0 && (
+          <p className="sm:col-span-2 lg:col-span-3 text-center text-muted-foreground">
+            No colleges found matching your criteria.
+          </p>
+        )}
+      </div>
     </section>
   );
 }
